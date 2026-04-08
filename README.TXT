@@ -4,15 +4,18 @@
 
 Adaptation of the original DOOM
 to be easily portable to framebuffer devices with minimal depenencies.
-Runs on:
-* Plain desktop Linux framebuffer,
-* Siglent SSA 3021X Spectrum Analyzer,
-* Frosted OS
+Runs on: *Any* Linux machine with s screen
 
 To build (example):
-* cd fbdoom
-* make CROSS_COMPILE=arm-linux-gnueabihf-
+$ sudo apt update
+$ sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+$ cd fbdoom
+$ make CROSS_COMPILE=aarch64-linux-gnu- NOSDL=1 
 
+To run:
+1) Download .wad file from Internet Archive (keyword: Doom1 wad, Doom 1.9 wad or Original Doom Ultimate wad)
+2) Rename the .wad file to "doom.wad" and put it to the same directory of the fbdoom executable
+3) Run: ./fbdoom (some useful params: -iwad <path-to-wad-file> -scaling 1.234)
 
 Original readme
 ===============
