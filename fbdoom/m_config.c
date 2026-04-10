@@ -2051,8 +2051,7 @@ static char *GetDefaultConfigDir(void)
     char *homedir;
     char *result;
 
-    // frosted HACK - homedir = getenv("HOME");
-    homedir = "/mnt";
+    homedir = getenv("HOME");
 
     if (homedir != NULL)
     {
