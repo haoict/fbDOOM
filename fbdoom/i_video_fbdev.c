@@ -209,8 +209,8 @@ void I_InitGraphics (void)
     if (i > 0) {
         // Manually scaling
         fb_scaling = atof(myargv[i + 1]);
-        fb_scale_dst_w = fb_scaling * SCREENWIDTH;
-        fb_scale_dst_h = fb_scaling * SCREENHEIGHT;
+        fb_scale_dst_w = (int)(fb_scaling * SCREENWIDTH);
+        fb_scale_dst_h = (int)(fb_scaling * SCREENHEIGHT);
         if (fb_scale_dst_w > (int)fb.xres || fb_scale_dst_h > (int)fb.yres) {
             printf("I_InitGraphics: error: requested scaling %.2f results in %dx%d, which exceeds framebuffer size %dx%d\n",
                     fb_scaling, fb_scale_dst_w, fb_scale_dst_h, fb.xres, fb.yres);
@@ -225,12 +225,12 @@ void I_InitGraphics (void)
         // Fit 320:200 into fb.xres x fb.yres (letterbox / pillarbox)
         fb_scale_dst_w = fb.xres;
         fb_scale_dst_h = fb.xres * SCREENHEIGHT / SCREENWIDTH;  // scale by width first
-        fb_scaling = (double)fb_scale_dst_w / SCREENWIDTH;
+        fb_scaling = (float)fb_scale_dst_w / SCREENWIDTH;
         if (fb_scale_dst_h > (int)fb.yres) {
             // Doesn't fit vertically — scale by height instead
             fb_scale_dst_h = fb.yres;
             fb_scale_dst_w = fb.yres * SCREENWIDTH / SCREENHEIGHT;
-            fb_scaling = (double)fb_scale_dst_h / SCREENHEIGHT;
+            fb_scaling = (float)fb_scale_dst_h / SCREENHEIGHT;
         }
     }
 
@@ -243,7 +243,7 @@ void I_InitGraphics (void)
     if (fb_scaling == floorf(fb_scaling)) {
         integer_scale = (int)fb_scaling;
     }
-
+    
 
     printf("I_InitGraphics: Scaling (%.2f): DOOM 320x200 -> %dx%d (centered in %dx%d)\n", fb_scaling, fb_scale_dst_w, fb_scale_dst_h, fb.xres, fb.yres);
 
@@ -458,8 +458,6 @@ void I_UpdateNoBlit (void)
 void I_FinishUpdate (void)
 {
     int y;
-    int x_offset, y_offset, x_offset_end;
-    unsigned char *line_in, *line_out;
 
     if (integer_scale == 0) {
         // ---------------------------------------------------------------
@@ -470,9 +468,9 @@ void I_FinishUpdate (void)
         blit_scaled_index(fb_scaled_buf, fb_scale_dst_w, fb_scale_dst_h,
                           I_VideoBuffer,  SCREENWIDTH,    SCREENHEIGHT);
 
-        // Center the scaled image in the framebuffer
-        int x_pad = (fb.xres - fb_scale_dst_w) / 2;  // pixels (not bytes)
-        int y_pad = (fb.yres - fb_scale_dst_h) / 2;  // lines
+        // Center the scaled image in the framebuffer (in pixels, not bytes)
+        int x_pad = ((int)fb.xres - fb_scale_dst_w) / 2;
+        int y_pad = ((int)fb.yres - fb_scale_dst_h) / 2;
 
         // Black out the entire fb buffer (letterbox / pillarbox bars)
         memset(I_VideoBuffer_FB, 0, fb.xres * fb.yres * (fb.bits_per_pixel / 8));
@@ -480,10 +478,7 @@ void I_FinishUpdate (void)
         int bpp = fb.bits_per_pixel / 8;
         for (y = 0; y < fb_scale_dst_h; y++) {
             uint8_t *src = fb_scaled_buf + y * fb_scale_dst_w;
-            uint8_t *dst = I_VideoBuffer_FB + ((y_pad + y) * fb.xres + x_pad) * bpp;
-            // cmap_to_fb with fb_scaling==0 would skip the scaling loop (k<0 never runs).
-            // Call a local variant: temporarily use fb_scaling=1 around the call.
-            // Simpler: replicate the pixel conversion inline for one pixel at a time.
+            uint8_t *dst = I_VideoBuffer_FB + ((y_pad + y) * (int)fb.xres + x_pad) * bpp;
             int x;
             for (x = 0; x < fb_scale_dst_w; x++) {
                 struct color c = colors[src[x]];
@@ -504,46 +499,64 @@ void I_FinishUpdate (void)
     } else {
         // ---------------------------------------------------------------
         // Integer scaling
+        //
+        // All offsets are kept in pixels (or lines) and only converted to
+        // bytes at the point of pointer arithmetic / lseek.
+        //
+        // The previous code computed x_offset and y_offset in bytes, then
+        // used y_offset as a line count in lseek() — giving a position
+        // bpp times too far down, breaking vertical centering.
         // ---------------------------------------------------------------
 
-        /* Offsets in case FB is bigger than DOOM */
-        /* 600 = fb heigt, 200 screenheight */
-        /* 600 = fb heigt, 200 screenheight */
-        /* 2048 =fb width, 320 screenwidth */
-        y_offset     = (((fb.yres - (SCREENHEIGHT * integer_scale)) * fb.bits_per_pixel/8)) / 2;
-        x_offset     = (((fb.xres - (SCREENWIDTH  * integer_scale)) * fb.bits_per_pixel/8)) / 2; // XXX: siglent FB hack: /4 instead of /2, since it seems to handle the resolution in a funny way
-        //x_offset     = 0;
-        x_offset_end = ((fb.xres - (SCREENWIDTH  * integer_scale)) * fb.bits_per_pixel/8) - x_offset;
+        const int bpp = fb.bits_per_pixel / 8;
 
-        /* DRAW SCREEN */
-        line_in  = (unsigned char *) I_VideoBuffer;
-        line_out = (unsigned char *) I_VideoBuffer_FB;
+        // Scaled image size in pixels
+        const int scaled_w = SCREENWIDTH  * integer_scale;
+        const int scaled_h = SCREENHEIGHT * integer_scale;
+
+        // Centering margins in pixels / lines
+        // x_pad       : left margin
+        // x_pad_end   : right margin (may differ by 1px due to rounding)
+        // y_pad       : top margin (lines)
+        const int x_pad     = ((int)fb.xres - scaled_w) / 2;
+        const int x_pad_end = (int)fb.xres - scaled_w - x_pad;
+        const int y_pad     = ((int)fb.yres - scaled_h) / 2;
+
+        unsigned char *line_in  = (unsigned char *)I_VideoBuffer;
+        unsigned char *line_out = (unsigned char *)I_VideoBuffer_FB;
 
         y = SCREENHEIGHT;
-
         while (y--)
         {
             int i;
             for (i = 0; i < integer_scale; i++) {
-                line_out += x_offset;
-    #ifdef CMAP256
-                for (integer_scale == 1) {
-                    memcpy(line_out, line_in, SCREENWIDTH); /* fb_width is bigger than Doom SCREENWIDTH... */
+                // Left pillarbox: x_pad pixels of black
+                memset(line_out, 0, x_pad * bpp);
+                line_out += x_pad * bpp;
+
+#ifdef CMAP256
+                if (integer_scale == 1) {
+                    memcpy(line_out, line_in, SCREENWIDTH);
                 } else {
                     //XXX FIXME integer_scale support!
                 }
-    #else
-                //cmap_to_rgb565((void*)line_out, (void*)line_in, SCREENWIDTH);
+#else
                 cmap_to_fb((void*)line_out, (void*)line_in, SCREENWIDTH);
-    #endif
-                line_out += (SCREENWIDTH * integer_scale * (fb.bits_per_pixel/8)) + x_offset_end;
+#endif
+                line_out += scaled_w * bpp;
+
+                // Right pillarbox: x_pad_end pixels of black
+                memset(line_out, 0, x_pad_end * bpp);
+                line_out += x_pad_end * bpp;
             }
             line_in += SCREENWIDTH;
         }
 
-        /* Start drawing from y-offset */
-        lseek(fd_fb, y_offset * fb.xres, SEEK_SET);
-        write(fd_fb, I_VideoBuffer_FB, (SCREENHEIGHT * integer_scale * (fb.bits_per_pixel/8)) * fb.xres); /* draw only portion used by doom + x-offsets */
+        // Seek to the start of the top letterbox (y_pad lines down),
+        // then write only the active region (scaled_h lines tall).
+        // y_pad is in lines; multiply by fb.xres * bpp to get bytes.
+        lseek(fd_fb, (off_t)y_pad * fb.xres * bpp, SEEK_SET);
+        write(fd_fb, I_VideoBuffer_FB, (off_t)scaled_h * fb.xres * bpp);
     }
 }
 
