@@ -187,11 +187,21 @@ void I_InitGraphics (void)
 {
     int i;
 
+    int fb_device = M_CheckParmWithArgs("-fb", 1);
+    char fb_device_path[10];
+    if (fb_device > 0) {
+        printf("I_InitGraphics: using framebuffer device '%s' from command line\n", myargv[fb_device + 1]);
+        strncpy(fb_device_path, myargv[fb_device + 1], sizeof(fb_device_path) - 1);
+        fb_device_path[sizeof(fb_device_path) - 1] = '\0';
+    } else {
+        strncpy(fb_device_path, "/dev/fb0", sizeof(fb_device_path) - 1);
+        fb_device_path[sizeof(fb_device_path) - 1] = '\0';
+    }
     /* Open fbdev file descriptor */
-    fd_fb = open("/dev/fb0", O_RDWR);
+    fd_fb = open(fb_device_path, O_RDWR);
     if (fd_fb < 0)
     {
-        printf("Could not open /dev/fb0");
+        printf("Could not open %s", fb_device_path);
         exit(-1);
     }
 
